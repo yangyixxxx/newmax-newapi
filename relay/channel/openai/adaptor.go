@@ -231,7 +231,10 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
-	if info.ChannelType != constant.ChannelTypeOpenAI && info.ChannelType != constant.ChannelTypeAzure {
+	// stream_options 跟随渠道能力声明（streamSupportedChannels 白名单），
+	// 不能只留 OpenAI/Azure：否则火山方舟等渠道的 include_usage 被抹掉，
+	// 上游不发尾部 usage-only chunk，Claude Messages 转换层拿不到 usage 收尾。
+	if !info.SupportStreamOptions {
 		request.StreamOptions = nil
 	}
 	if info.ChannelType == constant.ChannelTypeOpenRouter {
