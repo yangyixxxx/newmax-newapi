@@ -93,20 +93,24 @@ func ProcessStreamResponse(streamResponse dto.ChatCompletionsStreamResponse, res
 
 func processTokenData(relayMode int, data string, responseTextBuilder *strings.Builder, toolCount *int) error {
 	switch relayMode {
-	case relayconstant.RelayModeChatCompletions:
-		var streamResponse dto.ChatCompletionsStreamResponse
-		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
-			return err
-		}
-		return ProcessStreamResponse(streamResponse, responseTextBuilder, toolCount)
 	case relayconstant.RelayModeCompletions:
 		var streamResponse dto.CompletionsStreamResponse
 		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
 			return err
 		}
 		processCompletionsStreamResponse(streamResponse, responseTextBuilder)
+		return nil
+	default:
+		// 本函数只在 OpenAI 兼容上游的流式响应上调用；除 /v1/completions 外，
+		// /v1/chat/completions 以及转换而来的入口格式（如 /v1/messages 的
+		// Claude Messages，RelayMode 为 Unknown）都是 ChatCompletionsStreamResponse，
+		// 统一累计，保证上游不回 usage 时本地兜底计费不为 0。
+		var streamResponse dto.ChatCompletionsStreamResponse
+		if err := common.UnmarshalJsonStr(data, &streamResponse); err != nil {
+			return err
+		}
+		return ProcessStreamResponse(streamResponse, responseTextBuilder, toolCount)
 	}
-	return nil
 }
 
 func processCompletionsStreamResponse(streamResponse dto.CompletionsStreamResponse, responseTextBuilder *strings.Builder) {
@@ -157,19 +161,24 @@ func HandleFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, lastStream
 		helper.Done(c)
 
 	case types.RelayFormatClaude:
+		info.ClaudeConvertInfo.Usage = usage
+
 		var streamResponse dto.ChatCompletionsStreamResponse
 		if err := common.Unmarshal(common.StringToByteSlice(lastStreamData), &streamResponse); err != nil {
 			common.SysLog("error unmarshalling stream response: " + err.Error())
-			return
+		} else {
+			claudeResponses := service.StreamResponseOpenAI2Claude(&streamResponse, info)
+			for _, resp := range claudeResponses {
+				_ = helper.ClaudeData(c, *resp)
+			}
 		}
 
-		info.ClaudeConvertInfo.Usage = usage
-
-		claudeResponses := service.StreamResponseOpenAI2Claude(&streamResponse, info)
-		for _, resp := range claudeResponses {
+		// 无论最后一个 chunk 是否携带 finish_reason/usage（甚至无法解析），
+		// 流结束时都必须把 Claude 协议的收尾事件补齐，否则客户端会静默丢弃
+		// 未闭合的 tool_use 块并直接结束回合。
+		for _, resp := range service.FinalizeClaudeStream(info) {
 			_ = helper.ClaudeData(c, *resp)
 		}
-		info.ClaudeConvertInfo.Done = true
 
 	case types.RelayFormatGemini:
 		var streamResponse dto.ChatCompletionsStreamResponse

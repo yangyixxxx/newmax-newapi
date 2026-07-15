@@ -463,14 +463,18 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 	} else {
 		chosenChoice := openAIResponse.Choices[0]
 		doneChunk := chosenChoice.FinishReason != nil && *chosenChoice.FinishReason != ""
+		deferClose := false
 		if doneChunk {
 			info.FinishReason = *chosenChoice.FinishReason
-			oaiUsage := openAIResponse.Usage
-			if oaiUsage == nil {
-				oaiUsage = info.ClaudeConvertInfo.Usage
+			if openAIResponse.Usage == nil && info.ClaudeConvertInfo.Usage == nil {
 				// Some upstreams emit finish_reason first, then send a final usage-only chunk.
 				// Defer closing until usage is available so the final message_delta carries it.
-				return claudeResponses
+				// Only defer while NO usage exists at all: when HandleFinalResponse replays the
+				// last chunk it has already injected a fallback usage, and streams whose final
+				// data chunk is the finish_reason chunk itself (e.g. volcengine without a
+				// trailing usage chunk) must still be closed, otherwise the client receives a
+				// truncated Claude stream and silently drops tool_use blocks.
+				deferClose = true
 			}
 		}
 
@@ -578,7 +582,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 			claudeResponses = append(claudeResponses, &claudeResponse)
 		}
 
-		if doneChunk || info.ClaudeConvertInfo.Done {
+		if (doneChunk && !deferClose) || info.ClaudeConvertInfo.Done {
 			stopOpenBlocks()
 			oaiUsage := openAIResponse.Usage
 			if oaiUsage == nil {
@@ -601,6 +605,46 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 		}
 	}
 
+	return claudeResponses
+}
+
+// FinalizeClaudeStream force-closes a Claude-format converted stream that reached EOF
+// without the closing events (upstream never sent finish_reason, or the converter
+// deferred waiting for a usage chunk that never came). Protocol integrity must not
+// depend on upstream usage reporting: a dangling Claude stream makes clients drop
+// open tool_use blocks and end the turn silently.
+func FinalizeClaudeStream(info *relaycommon.RelayInfo) []*dto.ClaudeResponse {
+	if info.ClaudeConvertInfo == nil || info.ClaudeConvertInfo.Done {
+		return nil
+	}
+	var claudeResponses []*dto.ClaudeResponse
+	switch info.ClaudeConvertInfo.LastMessagesType {
+	case relaycommon.LastMessageTypeText, relaycommon.LastMessageTypeThinking:
+		claudeResponses = append(claudeResponses, generateStopBlock(info.ClaudeConvertInfo.Index))
+	case relaycommon.LastMessageTypeTools:
+		base := info.ClaudeConvertInfo.ToolCallBaseIndex
+		for offset := 0; offset <= info.ClaudeConvertInfo.ToolCallMaxIndexOffset; offset++ {
+			claudeResponses = append(claudeResponses, generateStopBlock(base+offset))
+		}
+	}
+	stopReason := stopReasonOpenAI2Claude(info.FinishReason)
+	if stopReason == "" {
+		stopReason = "end_turn"
+	}
+	messageDelta := &dto.ClaudeResponse{
+		Type: "message_delta",
+		Delta: &dto.ClaudeMediaMessage{
+			StopReason: common.GetPointer[string](stopReason),
+		},
+	}
+	if info.ClaudeConvertInfo.Usage != nil {
+		messageDelta.Usage = buildClaudeUsageFromOpenAIUsage(info.ClaudeConvertInfo.Usage)
+	}
+	claudeResponses = append(claudeResponses, messageDelta)
+	claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
+		Type: "message_stop",
+	})
+	info.ClaudeConvertInfo.Done = true
 	return claudeResponses
 }
 
