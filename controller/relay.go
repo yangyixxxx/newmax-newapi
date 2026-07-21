@@ -117,6 +117,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
+	// 护栏：image/video 生成模型（如 gpt-image-2）被误当聊天模型走对话补全端点时，上游只回空内容
+	// 却仍按图片价计费（客户端空转烧额度）。在计费/转发前以 400 拒绝并跳过重试，让客户端快速失败、
+	// 不产生消费。正规出图走 /v1/images/generations（RelayFormatOpenAIImage，不受影响）。
+	if helper.IsChatCompletionFormat(relayFormat) && helper.IsImageOrVideoGenModel(c.GetString("original_model")) {
+		newAPIError = types.NewError(
+			fmt.Errorf("model %q is an image/video generation model and is not supported on the chat/completions or messages endpoint; use the image generation endpoint (/v1/images/generations) instead", c.GetString("original_model")),
+			types.ErrorCodeInvalidRequest,
+			types.ErrOptionWithStatusCode(http.StatusBadRequest),
+			types.ErrOptionWithSkipRetry(),
+		)
+		return
+	}
+
 	relayInfo, err := relaycommon.GenRelayInfo(c, relayFormat, request, ws)
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)

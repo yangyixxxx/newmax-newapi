@@ -55,6 +55,33 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 	return request, err
 }
 
+// IsChatCompletionFormat 判断是否为对话补全类文本端点（会把整段对话丢给模型做补全）。
+// 护栏只在这些端点上拦截生成类模型；真正的图像端点 RelayFormatOpenAIImage 不受影响。
+func IsChatCompletionFormat(format types.RelayFormat) bool {
+	switch format {
+	case types.RelayFormatOpenAI, types.RelayFormatClaude,
+		types.RelayFormatOpenAIResponses, types.RelayFormatOpenAIResponsesCompaction:
+		return true
+	}
+	return false
+}
+
+// IsImageOrVideoGenModel 用模型名识别「只生成图像/视频、无法做对话补全」的模型。
+// 用具体家族关键词而非泛化的 "image"/"video" 子串，避免误伤多模态对话模型
+// （如 gemini 图像预览这类能在对话端点返图的模型）。
+func IsImageOrVideoGenModel(model string) bool {
+	m := strings.ToLower(model)
+	for _, kw := range []string{
+		"gpt-image", "dall-e", "dall·e", "imagen", "seedream", // 图像
+		"seedance", "kling", "jimeng", "vidu", // 视频
+	} {
+		if strings.Contains(m, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 func GetAndValidAudioRequest(c *gin.Context, relayMode int) (*dto.AudioRequest, error) {
 	audioRequest := &dto.AudioRequest{}
 	err := common.UnmarshalBodyReusable(c, audioRequest)
