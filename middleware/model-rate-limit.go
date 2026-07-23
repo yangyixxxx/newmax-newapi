@@ -21,6 +21,19 @@ const (
 	ModelRequestRateLimitSuccessCountMark = "MRRLS"
 )
 
+func bypassModelRequestRateLimit(c *gin.Context) bool {
+	path := c.FullPath()
+	if c.Request.Method == http.MethodPost &&
+		(path == "/v1/images/generations/async" || path == "/v1/images/edits/async") {
+		return true
+	}
+	if c.Request.Method == http.MethodGet &&
+		(path == "/v1/images/tasks/:task_id" || path == "/v1/images/tasks/by-request/:request_id") {
+		return true
+	}
+	return acceptedClientRequestID(c) != ""
+}
+
 // 检查Redis中的请求限制
 func checkRedisRateLimit(ctx context.Context, rdb *redis.Client, key string, maxCount int, duration int64) (bool, error) {
 	// 如果maxCount为0，表示不限制
@@ -166,6 +179,13 @@ func memoryRateLimitHandler(duration int64, totalMaxCount, successMaxCount int) 
 // ModelRequestRateLimit 模型请求限流中间件
 func ModelRequestRateLimit() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		// Task submission/polling is control-plane traffic, not a model invocation.
+		// The loopback-only internal worker call is the already accepted task and
+		// must not consume a second rate-limit slot.
+		if bypassModelRequestRateLimit(c) {
+			c.Next()
+			return
+		}
 		// 在每个请求时检查是否启用限流
 		if !setting.ModelRequestRateLimitEnabled {
 			c.Next()

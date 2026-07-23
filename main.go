@@ -221,6 +221,8 @@ func main() {
 		}
 	}()
 
+	controller.StartImageTaskWorker("http://127.0.0.1:" + port + "/v1")
+
 	time.Sleep(100 * time.Millisecond)
 
 	common.LogStartupSuccess(startTime, port)
