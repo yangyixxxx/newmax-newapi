@@ -1,11 +1,14 @@
 package model
 
 import (
+	"bytes"
 	"errors"
+	"log"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	gormlogger "gorm.io/gorm/logger"
 )
 
 func TestCreateOrGetImageTaskIsIdempotentPerUserAndRequest(t *testing.T) {
@@ -62,6 +65,25 @@ func TestImageTaskLookupIsScopedToToken(t *testing.T) {
 	_, exists, err = GetImageTaskByRequestID(99, task.RequestID)
 	require.NoError(t, err)
 	require.False(t, exists)
+}
+
+func TestClaimNextQueuedImageTaskDoesNotLogEmptyQueueAsError(t *testing.T) {
+	truncateTables(t)
+	var logs bytes.Buffer
+	originalLogger := DB.Logger
+	DB.Logger = gormlogger.New(log.New(&logs, "", 0), gormlogger.Config{
+		LogLevel: gormlogger.Warn,
+	})
+	t.Cleanup(func() {
+		DB.Logger = originalLogger
+	})
+
+	task, exists, err := ClaimNextQueuedImageTask()
+
+	require.NoError(t, err)
+	require.False(t, exists)
+	require.Nil(t, task)
+	require.NotContains(t, logs.String(), "record not found")
 }
 
 func TestStaleImageTaskIsFailedInsteadOfRequeued(t *testing.T) {

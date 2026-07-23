@@ -98,12 +98,15 @@ func GetImageTaskByRequestID(tokenID int, requestID string) (*ImageTask, bool, e
 func ClaimNextQueuedImageTask() (*ImageTask, bool, error) {
 	for attempts := 0; attempts < 8; attempts++ {
 		var task ImageTask
-		err := DB.Where("status = ?", ImageTaskStatusQueued).Order("id ASC").First(&task).Error
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, false, nil
+		query := DB.Where("status = ?", ImageTaskStatusQueued).
+			Order("id ASC").
+			Limit(1).
+			Find(&task)
+		if query.Error != nil {
+			return nil, false, query.Error
 		}
-		if err != nil {
-			return nil, false, err
+		if query.RowsAffected == 0 {
+			return nil, false, nil
 		}
 		now := time.Now().Unix()
 		result := DB.Model(&ImageTask{}).
