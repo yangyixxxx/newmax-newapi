@@ -47,3 +47,11 @@ func isOldWanModel(modelName string) bool {
 func isWanModel(modelName string) bool {
 	return strings.Contains(modelName, "wan")
 }
+
+// isWanGenModel 命中新版万相图像生成模型（wan2.6/wan2.7，含 wan2.7-image-pro 等变体）。
+// 这类模型虽然会被 IsSyncImageModel 命中（sync 白名单含 "wan2.6"/"wan2.7"），但走的是万相
+// image-generation/generation 端点、只接受 prompt 输入；若按 sync 多模态模型发 messages 输入
+// 会被上游 400 拒（messages 格式不兼容）。与 RelayModeImagesEdits 的 wan 处理保持一致。
+func isWanGenModel(modelName string) bool {
+	return isWanModel(modelName) && !isOldWanModel(modelName)
+}

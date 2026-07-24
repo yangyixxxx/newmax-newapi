@@ -106,7 +106,12 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 		case constant.RelayModeResponses:
 			fullRequestURL = fmt.Sprintf("%s/api/v2/apps/protocols/compatible-mode/v1/responses", info.ChannelBaseUrl)
 		case constant.RelayModeImagesGenerations:
-			if isSyncImageModel(info.OriginModelName) {
+			if isWanGenModel(info.OriginModelName) {
+				// wan2.6/2.7 图像生成走万相 image-generation 端点（prompt 输入），
+				// 不能走 multimodal-generation（messages 输入）否则上游 400 messages 不兼容。
+				// 与 RelayModeImagesEdits 的 wan 分支保持一致。
+				fullRequestURL = fmt.Sprintf("%s/api/v1/services/aigc/image-generation/generation", info.ChannelBaseUrl)
+			} else if isSyncImageModel(info.OriginModelName) {
 				fullRequestURL = fmt.Sprintf("%s/api/v1/services/aigc/multimodal-generation/generation", info.ChannelBaseUrl)
 			} else {
 				fullRequestURL = fmt.Sprintf("%s/api/v1/services/aigc/text2image/image-synthesis", info.ChannelBaseUrl)
@@ -139,7 +144,9 @@ func (a *Adaptor) SetupRequestHeader(c *gin.Context, req *http.Header, info *rel
 		req.Set("X-DashScope-Plugin", c.GetString("plugin"))
 	}
 	if info.RelayMode == constant.RelayModeImagesGenerations {
-		if isSyncImageModel(info.OriginModelName) {
+		// 仅真正的 sync 多模态图像模型（qwen-image/z-image 等）不加异步头；
+		// wan2.6/2.7 虽命中 sync 白名单，但走万相异步 image-generation 端点，需要异步头。
+		if isSyncImageModel(info.OriginModelName) && !isWanGenModel(info.OriginModelName) {
 
 		} else {
 			req.Set("X-DashScope-Async", "enable")
@@ -180,7 +187,13 @@ func (a *Adaptor) ConvertOpenAIRequest(c *gin.Context, info *relaycommon.RelayIn
 func (a *Adaptor) ConvertImageRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.ImageRequest) (any, error) {
 	if info.RelayMode == constant.RelayModeImagesGenerations {
 		if isSyncImageModel(info.OriginModelName) {
-			a.IsSyncImageModel = true
+			// wan2.6/2.7 命中 sync 白名单但需 prompt 输入而非 messages，强制按非 sync 构造
+			// （与 RelayModeImagesEdits 的 wan 处理一致），否则上游 400 messages 不兼容。
+			if isWanGenModel(info.OriginModelName) {
+				a.IsSyncImageModel = false
+			} else {
+				a.IsSyncImageModel = true
+			}
 		}
 		aliRequest, err := oaiImage2AliImageRequest(info, request, a.IsSyncImageModel)
 		if err != nil {
