@@ -18,12 +18,16 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 import { Gauge, HeartPulse, Timer } from 'lucide-react'
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { StatusBadge, type StatusVariant } from '@/components/status-badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { getPerfMetricsSummary } from '@/features/performance-metrics/api'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
+import {
+  getPerfMetricsChannelSummary,
+  getPerfMetricsSummary,
+} from '@/features/performance-metrics/api'
 import {
   formatLatency,
   formatThroughput,
@@ -31,11 +35,18 @@ import {
   getSuccessRateLevel,
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
-import type { PerfModelSummary } from '@/features/performance-metrics/types'
+import type {
+  PerfChannelSummary,
+  PerfModelSummary,
+} from '@/features/performance-metrics/types'
+import { useIsAdmin } from '@/hooks/use-admin'
 import { cn } from '@/lib/utils'
 
 const PERFORMANCE_WINDOW_HOURS = 24
 const TOP_MODEL_LIMIT = 6
+const TOP_CHANNEL_LIMIT = 8
+
+type PerfView = 'model' | 'channel'
 const METRIC_SKELETON_KEYS = [
   'success-rate-skeleton',
   'latency-skeleton',
@@ -90,6 +101,8 @@ function buildPerformanceSummary(rows: PerfModelSummary[]): PerformanceSummary {
 
 export function PerformanceOverview() {
   const { t } = useTranslation()
+  const isAdmin = useIsAdmin()
+  const [view, setView] = useState<PerfView>('model')
   const metricsQuery = useQuery({
     queryKey: ['perf-metrics-summary', PERFORMANCE_WINDOW_HOURS],
     queryFn: () => getPerfMetricsSummary(PERFORMANCE_WINDOW_HOURS),
@@ -97,13 +110,32 @@ export function PerformanceOverview() {
     retry: false,
   })
 
+  // Per-channel breakdown is admin-only and fetched lazily when that view is active.
+  const channelQuery = useQuery({
+    queryKey: ['perf-metrics-channel-summary', PERFORMANCE_WINDOW_HOURS],
+    queryFn: () => getPerfMetricsChannelSummary(PERFORMANCE_WINDOW_HOURS),
+    staleTime: 60 * 1000,
+    retry: false,
+    enabled: isAdmin && view === 'channel',
+  })
+
   const models = useMemo(
     () => metricsQuery.data?.data.models ?? [],
     [metricsQuery.data]
   )
+  const channels = useMemo(
+    () => channelQuery.data?.data.channels ?? [],
+    [channelQuery.data]
+  )
   const summary = useMemo(() => buildPerformanceSummary(models), [models])
   const topModels = useMemo(() => models.slice(0, TOP_MODEL_LIMIT), [models])
+  const topChannels = useMemo(
+    () => channels.slice(0, TOP_CHANNEL_LIMIT),
+    [channels]
+  )
+  const channelView = view === 'channel'
   const loading = metricsQuery.isLoading
+  const channelLoading = channelQuery.isLoading
   const hasData = models.length > 0
 
   if (!loading && !hasData) {
@@ -127,6 +159,28 @@ export function PerformanceOverview() {
             {t('Performance health')}
           </span>
         </div>
+
+        {/* Model / channel toggle (admin only) */}
+        {isAdmin && (
+          <ToggleGroup
+            value={[view]}
+            onValueChange={(value) => {
+              const next = value.find((item) => item !== view)
+              if (next === 'model' || next === 'channel') setView(next)
+            }}
+            aria-label={t('Performance breakdown')}
+            variant='outline'
+            size='sm'
+            spacing={0}
+          >
+            <ToggleGroupItem value='model' className='px-2.5 text-xs'>
+              {t('By model')}
+            </ToggleGroupItem>
+            <ToggleGroupItem value='channel' className='px-2.5 text-xs'>
+              {t('By channel')}
+            </ToggleGroupItem>
+          </ToggleGroup>
+        )}
 
         {/* Separator */}
         <div className='bg-border hidden h-4 w-px sm:block' />
@@ -165,15 +219,52 @@ export function PerformanceOverview() {
         {/* Separator */}
         <div className='bg-border hidden h-4 w-px lg:block' />
 
-        {/* Top models inline badges */}
-        {!loading && hasData && (
-          <div className='flex flex-wrap items-center gap-1.5'>
-            {topModels.map((model) => (
-              <ModelBadge key={model.model_name} model={model} />
-            ))}
-          </div>
+        {/* Top models / channels inline badges */}
+        {channelView ? (
+          <ChannelBadges
+            loading={channelLoading}
+            channels={topChannels}
+            emptyLabel={t('No channel performance data yet')}
+          />
+        ) : (
+          !loading &&
+          hasData && (
+            <div className='flex flex-wrap items-center gap-1.5'>
+              {topModels.map((model) => (
+                <ModelBadge key={model.model_name} model={model} />
+              ))}
+            </div>
+          )
         )}
       </div>
+    </div>
+  )
+}
+
+function ChannelBadges(props: {
+  loading: boolean
+  channels: PerfChannelSummary[]
+  emptyLabel: string
+}) {
+  if (props.loading) {
+    return (
+      <div className='flex flex-wrap items-center gap-1.5'>
+        {METRIC_SKELETON_KEYS.map((key) => (
+          <Skeleton key={key} className='h-5 w-24 rounded-full' />
+        ))}
+      </div>
+    )
+  }
+  if (props.channels.length === 0) {
+    return (
+      <span className='text-muted-foreground text-xs'>{props.emptyLabel}</span>
+    )
+  }
+  return (
+    <div className='flex flex-wrap items-center gap-1.5'>
+      {props.channels.map((channel) => (
+        <ChannelBadge key={channel.channel_id} channel={channel} />
+      ))}
     </div>
   )
 }
@@ -205,23 +296,41 @@ function InlineMetric(props: {
   )
 }
 
+function successRateVariant(rate: number): StatusVariant {
+  const level = getSuccessRateLevel(rate)
+  if (level === 'excellent' || level === 'good') return 'success'
+  if (level === 'warning') return 'warning'
+  if (level === 'critical') return 'destructive'
+  return 'neutral'
+}
+
 function ModelBadge(props: { model: PerfModelSummary }) {
   const model = props.model
-  const level = getSuccessRateLevel(model.success_rate)
-  let variant: StatusVariant = 'neutral'
-  if (level === 'excellent' || level === 'good') {
-    variant = 'success'
-  } else if (level === 'warning') {
-    variant = 'warning'
-  } else if (level === 'critical') {
-    variant = 'destructive'
-  }
-
   return (
-    <StatusBadge variant={variant}>
+    <StatusBadge variant={successRateVariant(model.success_rate)}>
       <span className='mr-1 max-w-[10rem] truncate'>{model.model_name}</span>
       <span className='tabular-nums'>
         {formatUptimePct(model.success_rate)}
+      </span>
+    </StatusBadge>
+  )
+}
+
+function ChannelBadge(props: { channel: PerfChannelSummary }) {
+  const { t } = useTranslation()
+  const channel = props.channel
+  // channel_id = 0 is the sentinel for historical failures that predate
+  // per-channel recording and cannot be attributed to a real channel.
+  const label =
+    channel.channel_id === 0
+      ? t('Unattributed (historical)')
+      : channel.channel_name || `#${channel.channel_id}`
+
+  return (
+    <StatusBadge variant={successRateVariant(channel.success_rate)}>
+      <span className='mr-1 max-w-[10rem] truncate'>{label}</span>
+      <span className='tabular-nums'>
+        {formatUptimePct(channel.success_rate)}
       </span>
     </StatusBadge>
   )

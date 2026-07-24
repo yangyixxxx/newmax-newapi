@@ -90,6 +90,7 @@ func SetRelayRouter(router *gin.Engine) {
 		//http router
 		httpRouter := relayV1Router.Group("")
 		httpRouter.Use(middleware.Distribute())
+		httpRouter.Use(middleware.RelayBodyCapture()) // 全量落请求/响应正文（RELAY_BODY_CAPTURE 开关，默认关）
 
 		// claude related routes
 		httpRouter.POST("/messages", func(c *gin.Context) {

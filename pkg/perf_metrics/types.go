@@ -10,6 +10,7 @@ type Store interface {
 type Sample struct {
 	Model        string
 	Group        string
+	ChannelId    int
 	LatencyMs    int64
 	TtftMs       int64
 	HasTtft      bool
@@ -64,6 +65,31 @@ type bucketKey struct {
 	model    string
 	group    string
 	bucketTs int64
+}
+
+// channelBucketKey mirrors bucketKey with an added channel dimension. It feeds
+// the parallel per-channel accumulator (hotChannelBuckets) and never touches the
+// model-only hot path above.
+type channelBucketKey struct {
+	model     string
+	group     string
+	channelId int
+	bucketTs  int64
+}
+
+// ChannelSummary is one channel's aggregated performance over a query window.
+type ChannelSummary struct {
+	ChannelId    int     `json:"channel_id"`
+	RequestCount int64   `json:"request_count"`
+	SuccessRate  float64 `json:"success_rate"`
+	AvgLatencyMs int64   `json:"avg_latency_ms"`
+	AvgTps       float64 `json:"avg_tps"`
+}
+
+// ChannelSummaryResult is the payload returned to the channel summary endpoint.
+type ChannelSummaryResult struct {
+	Model    string           `json:"model,omitempty"`
+	Channels []ChannelSummary `json:"channels"`
 }
 
 type counters struct {

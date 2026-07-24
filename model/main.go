@@ -277,6 +277,7 @@ func migrateDB() error {
 		&Redemption{},
 		&Ability{},
 		&Log{},
+		&RelayBody{},
 		&Midjourney{},
 		&TopUp{},
 		&QuotaData{},
@@ -295,6 +296,7 @@ func migrateDB() error {
 		&CustomOAuthProvider{},
 		&UserOAuthBinding{},
 		&PerfMetric{},
+		&PerfMetricChannel{},
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
@@ -332,6 +334,7 @@ func migrateDBFast() error {
 		{&Redemption{}, "Redemption"},
 		{&Ability{}, "Ability"},
 		{&Log{}, "Log"},
+		{&RelayBody{}, "RelayBody"},
 		{&Midjourney{}, "Midjourney"},
 		{&TopUp{}, "TopUp"},
 		{&QuotaData{}, "QuotaData"},
@@ -350,6 +353,7 @@ func migrateDBFast() error {
 		{&CustomOAuthProvider{}, "CustomOAuthProvider"},
 		{&UserOAuthBinding{}, "UserOAuthBinding"},
 		{&PerfMetric{}, "PerfMetric"},
+		{&PerfMetricChannel{}, "PerfMetricChannel"},
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
@@ -392,9 +396,13 @@ func migrateDBFast() error {
 
 func migrateLOGDB() error {
 	if common.UsingLogDatabase(common.DatabaseTypeClickHouse) {
-		return migrateClickHouseLogDB()
+		if err := migrateClickHouseLogDB(); err != nil {
+			return err
+		}
+		// relay_bodies 走通用 GORM 迁移（ClickHouse 下仅 Log 有专用建表 SQL）。
+		return LOG_DB.AutoMigrate(&RelayBody{})
 	}
-	return LOG_DB.AutoMigrate(&Log{})
+	return LOG_DB.AutoMigrate(&Log{}, &RelayBody{})
 }
 
 func migrateClickHouseLogDB() error {

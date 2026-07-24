@@ -7,7 +7,10 @@ COPY web/classic/package.json ./classic/package.json
 RUN bun install --frozen-lockfile
 COPY ./web/default ./default
 COPY ./VERSION /build/VERSION
-RUN cd default && DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat /build/VERSION) bun run build
+# bun workspace 把依赖 hoist 到 /build/web/node_modules，但 default 的 fonts.css 用
+# 相对路径 ../../node_modules 引字体（= /build/web/default/node_modules），该目录不存在。
+# 软链到根 node_modules 让 rspack 解析得到，纯构建期修复，不改产物。
+RUN ln -sfn ../node_modules default/node_modules && cd default && DISABLE_ESLINT_PLUGIN='true' VITE_REACT_APP_VERSION=$(cat /build/VERSION) bun run build
 
 FROM oven/bun:1@sha256:0733e50325078969732ebe3b15ce4c4be5082f18c4ac1a0f0ca4839c2e4e42a7 AS builder-classic
 

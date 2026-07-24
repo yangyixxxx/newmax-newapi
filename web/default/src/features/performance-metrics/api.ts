@@ -18,7 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import type { PerformanceMetricsData, PerfSummaryAllData } from './types'
+import type {
+  PerfChannelSummaryData,
+  PerformanceMetricsData,
+  PerfSummaryAllData,
+} from './types'
 
 export async function getPerfMetricsSummary(
   hours = 24
@@ -26,6 +30,21 @@ export async function getPerfMetricsSummary(
   const res = await api.get<PerfSummaryAllData>('/api/perf-metrics/summary', {
     params: { hours },
   })
+  return res.data
+}
+
+// Admin-only: per-channel success rate / latency / throughput over the window.
+// Pass modelName to scope to a single model.
+export async function getPerfMetricsChannelSummary(
+  hours = 24,
+  modelName?: string
+): Promise<PerfChannelSummaryData> {
+  const res = await api.get<PerfChannelSummaryData>(
+    '/api/perf-metrics/channels',
+    {
+      params: modelName ? { hours, model: modelName } : { hours },
+    }
+  )
   return res.data
 }
 

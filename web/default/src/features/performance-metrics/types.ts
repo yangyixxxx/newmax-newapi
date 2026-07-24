@@ -59,3 +59,21 @@ export type PerfSummaryAllData = {
     models: PerfModelSummary[]
   }
 }
+
+export type PerfChannelSummary = {
+  channel_id: number
+  channel_name: string
+  request_count: number
+  success_rate: number
+  avg_latency_ms: number
+  avg_tps: number
+}
+
+export type PerfChannelSummaryData = {
+  success: boolean
+  message?: string
+  data: {
+    model?: string
+    channels: PerfChannelSummary[]
+  }
+}
