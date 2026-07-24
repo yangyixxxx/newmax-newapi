@@ -16,6 +16,11 @@ import (
 
 var hotBuckets sync.Map
 
+// hotChannelBuckets accumulates per-channel samples (keyed by channelBucketKey)
+// awaiting flush into perf_metrics_channel. Single-node in-memory buffer, same
+// as hotBuckets; the query path merges it with the persisted rows.
+var hotChannelBuckets sync.Map
+
 // seriesSchema is a stable client cache/schema marker. Do not change it when
 // hiding fields or making response-only privacy hardening changes.
 const seriesSchema = "dbcd0a3c01b55203"
@@ -45,6 +50,7 @@ func RecordRelaySample(info *relaycommon.RelayInfo, success bool, outputTokens i
 	Record(Sample{
 		Model:        info.OriginModelName,
 		Group:        info.UsingGroup,
+		ChannelId:    info.ChannelId,
 		LatencyMs:    latencyMs,
 		TtftMs:       ttftMs,
 		HasTtft:      hasTtft,
@@ -66,14 +72,26 @@ func Record(sample Sample) {
 		sample.LatencyMs = 0
 	}
 
+	bucketTs := bucketStart(time.Now().Unix())
 	key := bucketKey{
 		model:    sample.Model,
 		group:    sample.Group,
-		bucketTs: bucketStart(time.Now().Unix()),
+		bucketTs: bucketTs,
 	}
 	actual, _ := hotBuckets.LoadOrStore(key, &atomicBucket{})
 	actual.(*atomicBucket).add(sample)
 	recordRedis(key, sample)
+
+	// Parallel per-channel accumulation. Independent of the model-only path
+	// above so the existing success-rate feature is unaffected.
+	chKey := channelBucketKey{
+		model:     sample.Model,
+		group:     sample.Group,
+		channelId: sample.ChannelId,
+		bucketTs:  bucketTs,
+	}
+	chActual, _ := hotChannelBuckets.LoadOrStore(chKey, &atomicBucket{})
+	chActual.(*atomicBucket).add(sample)
 }
 
 func Query(params QueryParams) (QueryResult, error) {
@@ -196,6 +214,92 @@ func QuerySummaryAll(hours int, groups []string) (SummaryAllResult, error) {
 	})
 
 	return SummaryAllResult{Models: models}, nil
+}
+
+// QueryChannelSummaryAll aggregates per-channel performance over the window,
+// merging persisted perf_metrics_channel rows with the in-memory hot buckets.
+// When modelName is non-empty the result is scoped to that model.
+func QueryChannelSummaryAll(hours int, groups []string, modelName string) (ChannelSummaryResult, error) {
+	if hours <= 0 {
+		hours = 24
+	}
+	if hours > 24*30 {
+		hours = 24 * 30
+	}
+	endTs := time.Now().Unix()
+	startTs := endTs - int64(hours)*3600
+	allowedGroups := allowedGroupSet(groups)
+
+	rows, err := model.GetPerfMetricsChannelSummaryAll(startTs, endTs, groups, modelName)
+	if err != nil {
+		return ChannelSummaryResult{}, err
+	}
+
+	totals := map[int]counters{}
+	for _, row := range rows {
+		mergeChannelTotals(totals, row.ChannelId, counters{
+			requestCount:   row.RequestCount,
+			successCount:   row.SuccessCount,
+			totalLatencyMs: row.TotalLatencyMs,
+			outputTokens:   row.OutputTokens,
+			generationMs:   row.GenerationMs,
+		})
+	}
+
+	hotChannelBuckets.Range(func(key, value any) bool {
+		k := key.(channelBucketKey)
+		if k.bucketTs < startTs || k.bucketTs > endTs {
+			return true
+		}
+		if modelName != "" && k.model != modelName {
+			return true
+		}
+		if allowedGroups != nil {
+			if _, ok := allowedGroups[k.group]; !ok {
+				return true
+			}
+		}
+		snap := value.(*atomicBucket).snapshot()
+		if snap.requestCount == 0 {
+			return true
+		}
+		mergeChannelTotals(totals, k.channelId, snap)
+		return true
+	})
+
+	channels := make([]ChannelSummary, 0, len(totals))
+	for id, total := range totals {
+		if total.requestCount == 0 {
+			continue
+		}
+		channels = append(channels, ChannelSummary{
+			ChannelId:    id,
+			RequestCount: total.requestCount,
+			SuccessRate:  math.Round(successRate(total)*100) / 100,
+			AvgLatencyMs: avg(total.totalLatencyMs, total.requestCount),
+			AvgTps:       math.Round(avgTps(total)*100) / 100,
+		})
+	}
+	sort.Slice(channels, func(i, j int) bool {
+		return channels[i].RequestCount > channels[j].RequestCount
+	})
+
+	return ChannelSummaryResult{Model: modelName, Channels: channels}, nil
+}
+
+func mergeChannelTotals(totals map[int]counters, channelId int, value counters) {
+	if value.requestCount == 0 {
+		return
+	}
+	current := totals[channelId]
+	current.requestCount += value.requestCount
+	current.successCount += value.successCount
+	current.totalLatencyMs += value.totalLatencyMs
+	current.ttftSumMs += value.ttftSumMs
+	current.ttftCount += value.ttftCount
+	current.outputTokens += value.outputTokens
+	current.generationMs += value.generationMs
+	totals[channelId] = current
 }
 
 func mergeModelTotals(totals map[string]counters, modelName string, value counters) {

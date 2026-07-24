@@ -423,6 +423,26 @@ func GetChannelById(id int, selectAll bool) (*Channel, error) {
 	return channel, nil
 }
 
+// GetChannelNamesByIds returns an id->name map for the given channel ids.
+// Ids with no matching (e.g. deleted) channel are simply absent from the map.
+func GetChannelNamesByIds(ids []int) (map[int]string, error) {
+	names := make(map[int]string, len(ids))
+	if len(ids) == 0 {
+		return names, nil
+	}
+	var rows []struct {
+		Id   int
+		Name string
+	}
+	if err := DB.Table("channels").Select("id, name").Where("id IN ?", ids).Find(&rows).Error; err != nil {
+		return names, err
+	}
+	for _, row := range rows {
+		names[row.Id] = row.Name
+	}
+	return names, nil
+}
+
 func BatchInsertChannels(channels []Channel) error {
 	if len(channels) == 0 {
 		return nil
