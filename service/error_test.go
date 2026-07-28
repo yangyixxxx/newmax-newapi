@@ -88,10 +88,57 @@ func TestRelayErrorHandlerTruncatesInvalidJSONBodyInLog(t *testing.T) {
 	newAPIError := RelayErrorHandler(context.Background(), resp, false)
 
 	require.NotNil(t, newAPIError)
-	require.Equal(t, "bad response status code 500", newAPIError.Error())
+	require.Equal(t,
+		fmt.Sprintf("bad response status code 500, upstream body: %s... [truncated]", strings.Repeat("b", upstreamErrorBodyLimit)),
+		newAPIError.Error())
 	require.Contains(t, logBuffer.String(), "[truncated")
 	require.Contains(t, logBuffer.String(), fmt.Sprintf("original_length=%d", len(body)))
 	require.NotContains(t, logBuffer.String(), strings.Repeat("b", common.LocalLogContentLimit+1))
+}
+
+func TestRelayErrorHandlerPassesThroughPlainTextBody(t *testing.T) {
+	withDebugEnabled(t, false)
+
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader("Error when parsing request")),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, "bad response status code 400, upstream body: Error when parsing request", newAPIError.Error())
+	openAIError := newAPIError.ToOpenAIError()
+	require.Equal(t, "bad response status code 400, upstream body: Error when parsing request", openAIError.Message)
+}
+
+func TestRelayErrorHandlerFallsBackWhenBodyEmpty(t *testing.T) {
+	withDebugEnabled(t, false)
+
+	resp := &http.Response{
+		StatusCode: http.StatusBadGateway,
+		Body:       io.NopCloser(strings.NewReader("   ")),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, "bad response status code 502", newAPIError.Error())
+}
+
+func TestRelayErrorHandlerPassesThroughJSONBodyWithoutMessage(t *testing.T) {
+	withDebugEnabled(t, false)
+
+	body := `{"unrecognized_field":"some upstream detail"}`
+	resp := &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Body:       io.NopCloser(strings.NewReader(body)),
+	}
+
+	newAPIError := RelayErrorHandler(context.Background(), resp, false)
+
+	require.NotNil(t, newAPIError)
+	require.Equal(t, "bad response status code 400, upstream body: "+body, newAPIError.Error())
 }
 
 func TestRelayErrorHandlerKeepsStructuredErrorMessage(t *testing.T) {

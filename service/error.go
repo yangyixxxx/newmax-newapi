@@ -107,7 +107,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 			newApiErr.Err = buildErrWithBody("")
 		} else {
 			logger.LogError(ctx, fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, responseBodyPreview))
-			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
+			newApiErr = types.NewOpenAIError(errors.New(upstreamErrorMessage(resp.StatusCode, responseBodyText)), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 		}
 		return
 	}
@@ -123,11 +123,34 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 			return
 		}
 	}
-	newApiErr = types.NewOpenAIError(errors.New(errResponse.ToMessage()), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
+	message := errResponse.ToMessage()
+	if message == "" {
+		message = upstreamErrorMessage(resp.StatusCode, responseBodyText)
+	}
+	newApiErr = types.NewOpenAIError(errors.New(message), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 	if showBodyWhenFail {
 		newApiErr.Err = buildErrWithBody(newApiErr.Error())
 	}
 	return
+}
+
+// upstreamErrorBodyLimit caps how much of an upstream error body without a
+// parseable error message is passed through to the client-visible message.
+const upstreamErrorBodyLimit = 512
+
+// upstreamErrorMessage passes a non-standard upstream error body through to the
+// client instead of hiding it behind a bare status code, so callers can see what
+// the upstream actually rejected. Sensitive info is masked later by
+// NewAPIError.ToOpenAIError / ToClaudeError.
+func upstreamErrorMessage(statusCode int, body string) string {
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return fmt.Sprintf("bad response status code %d", statusCode)
+	}
+	if runes := []rune(body); len(runes) > upstreamErrorBodyLimit {
+		body = string(runes[:upstreamErrorBodyLimit]) + "... [truncated]"
+	}
+	return fmt.Sprintf("bad response status code %d, upstream body: %s", statusCode, body)
 }
 
 func ResetStatusCode(newApiErr *types.NewAPIError, statusCodeMappingStr string) {
