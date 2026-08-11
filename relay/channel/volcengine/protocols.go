@@ -36,11 +36,13 @@ const (
 )
 
 const (
+	SerializationNone SerializationBits = 0
 	SerializationJSON SerializationBits = 0b1
 )
 
 const (
 	CompressionNone CompressionBits = 0
+	CompressionGzip CompressionBits = 0b1
 )
 
 const (

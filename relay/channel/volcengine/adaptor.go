@@ -27,6 +27,7 @@ import (
 const (
 	contextKeyTTSRequest     = "volcengine_tts_request"
 	contextKeyResponseFormat = "response_format"
+	contextKeyASRRequest     = "volcengine_asr_request"
 )
 
 type Adaptor struct {
@@ -47,6 +48,15 @@ func (a *Adaptor) ConvertClaudeRequest(c *gin.Context, info *relaycommon.RelayIn
 }
 
 func (a *Adaptor) ConvertAudioRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.AudioRequest) (io.Reader, error) {
+	if info.RelayMode == constant.RelayModeAudioTranscription {
+		asrReq, err := buildASRRelayRequest(c, info, request)
+		if err != nil {
+			return nil, err
+		}
+		c.Set(contextKeyASRRequest, asrReq)
+		return bytes.NewReader(nil), nil
+	}
+
 	if info.RelayMode != constant.RelayModeAudioSpeech {
 		return nil, errors.New("unsupported audio relay mode")
 	}
@@ -278,6 +288,8 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 				return "wss://openspeech.bytedance.com/api/v1/tts/ws_binary", nil
 			}
 			return fmt.Sprintf("%s/v1/audio/speech", baseUrl), nil
+		case constant.RelayModeAudioTranscription:
+			return asrDefaultEndpoint, nil
 		default:
 		}
 	}
@@ -330,6 +342,9 @@ func (a *Adaptor) ConvertOpenAIResponsesRequest(c *gin.Context, info *relaycommo
 }
 
 func (a *Adaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, requestBody io.Reader) (any, error) {
+	if info.RelayMode == constant.RelayModeAudioTranscription {
+		return nil, nil
+	}
 	if info.RelayMode == constant.RelayModeAudioSpeech {
 		baseUrl := info.ChannelBaseUrl
 		if baseUrl == "" {
@@ -351,6 +366,34 @@ func (a *Adaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycom
 			adaptor := claude.Adaptor{}
 			return adaptor.DoResponse(c, resp, info)
 		}
+	}
+
+	if info.RelayMode == constant.RelayModeAudioTranscription {
+		asrReqInterface, exists := c.Get(contextKeyASRRequest)
+		if !exists {
+			return nil, types.NewErrorWithStatusCode(
+				errors.New("volcengine ASR request not found in context"),
+				types.ErrorCodeBadRequestBody,
+				http.StatusInternalServerError,
+			)
+		}
+		asrReq, ok := asrReqInterface.(*asrRelayRequest)
+		if !ok {
+			return nil, types.NewErrorWithStatusCode(
+				errors.New("invalid volcengine ASR request type"),
+				types.ErrorCodeBadRequestBody,
+				http.StatusInternalServerError,
+			)
+		}
+		requestURL, urlErr := a.GetRequestURL(info)
+		if urlErr != nil {
+			return nil, types.NewErrorWithStatusCode(
+				urlErr,
+				types.ErrorCodeBadRequestBody,
+				http.StatusInternalServerError,
+			)
+		}
+		return handleASRWebSocketResponse(c, requestURL, asrReq, info)
 	}
 
 	if info.RelayMode == constant.RelayModeAudioSpeech {

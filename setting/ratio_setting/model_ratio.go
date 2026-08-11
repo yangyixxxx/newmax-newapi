@@ -113,6 +113,10 @@ var defaultModelRatio = map[string]float64{
 	"text-davinci-edit-001":                     10,
 	"code-davinci-edit-001":                     10,
 	"whisper-1":                                 15,  // $0.006 / minute -> $0.006 / 150 words -> $0.006 / 200 tokens -> $0.03 / 1k tokens
+	// 豆包流式语音识别 2.0：官方 ¥1/小时 ×1.25 加价 = ¥1.25/h（毛利 20%），
+	// N币↔quota 按 RATE_SELL=9 ¥/$ 折算 → $0.1389/h ÷ 60k tokens(1分钟=1000) ÷ $0.002 ≈ 1.16。
+	// 音频时长计入 prompt tokens；输出文本不计费（completion ratio = 0，见 defaultCompletionRatio）。
+	"doubao-seed-asr":                           1.16,
 	"tts-1":                                     7.5, // 1k characters -> $0.015
 	"tts-1-1106":                                7.5, // 1k characters -> $0.015
 	"tts-1-hd":                                  15,  // 1k characters -> $0.03
@@ -330,6 +334,8 @@ var defaultCompletionRatio = map[string]float64{
 	"gpt-4o-gizmo-*": 3,
 	"gpt-4-all":      2,
 	"gpt-image-1":    8,
+	// ASR 按音频时长（prompt tokens）计价，识别出的文本不重复收费
+	"doubao-seed-asr": 0,
 }
 
 // InitRatioSettings initializes all model related settings maps
