@@ -143,6 +143,20 @@ func OaiStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Re
 		}
 	})
 
+	// 客户端在首个有效上游片段前断开时，不得用完整输入估算 usage。
+	// 返回不可重试的失败，让外层退还本次请求的全部预扣费。
+	if info.StreamStatus != nil &&
+		info.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone &&
+		info.ReceivedResponseCount == 0 {
+		return nil, types.NewOpenAIError(
+			fmt.Errorf("client disconnected before first stream response: %w", info.StreamStatus.EndError),
+			types.ErrorCodeEmptyResponse,
+			499,
+			types.ErrOptionWithSkipRetry(),
+			types.ErrOptionWithNoRecordErrorLog(),
+		)
+	}
+
 	// 对音频模型，从倒数第二个stream data中提取usage信息
 	if isAudioModel && secondLastStreamData != "" {
 		var streamResp struct {
