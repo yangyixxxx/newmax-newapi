@@ -374,7 +374,11 @@ func GetByTaskIds(userId int, taskIds []any) ([]*Task, error) {
 }
 
 func (Task *Task) Insert() error {
-	var err error
+	release, err := BeginNewmaxTokenOperation(Task.PrivateData.TokenId)
+	if err != nil {
+		return err
+	}
+	defer release()
 	err = DB.Create(Task).Error
 	return err
 }
@@ -412,7 +416,11 @@ func (t *Task) Snapshot() taskSnapshot {
 }
 
 func (Task *Task) Update() error {
-	var err error
+	release, err := BeginNewmaxTokenOperation(Task.PrivateData.TokenId)
+	if err != nil {
+		return err
+	}
+	defer release()
 	err = DB.Save(Task).Error
 	return err
 }

@@ -99,6 +99,21 @@ func ensureLogRequestId(log *Log) {
 }
 
 func createLog(log *Log) error {
+	release, err := BeginNewmaxTokenOperation(log.TokenId)
+	if errors.Is(err, ErrNewmaxAccountDeleted) {
+		log.TokenName = ""
+		log.Username = ""
+		log.Content = ""
+		log.Ip = ""
+		log.Other = "{}"
+		log.RequestId = ""
+		log.UpstreamRequestId = ""
+		return LOG_DB.Create(log).Error
+	}
+	if err != nil {
+		return err
+	}
+	defer release()
 	ensureLogRequestId(log)
 	return LOG_DB.Create(log).Error
 }

@@ -82,6 +82,12 @@ func imageTaskRequestID(c *gin.Context) (string, error) {
 }
 
 func SubmitImageTask(c *gin.Context) {
+	release, guardErr := model.BeginNewmaxTokenOperation(c.GetInt("token_id"))
+	if guardErr != nil {
+		imageTaskError(c, http.StatusUnauthorized, "Account unavailable")
+		return
+	}
+	defer release()
 	requestID, err := imageTaskRequestID(c)
 	if err != nil {
 		imageTaskError(c, http.StatusBadRequest, err.Error())
@@ -108,6 +114,10 @@ func SubmitImageTask(c *gin.Context) {
 	}
 
 	taskID := model.GenerateTaskID()
+	if err = model.RegisterNewmaxImageTaskDirectory(taskID, tokenID); err != nil {
+		imageTaskError(c, http.StatusServiceUnavailable, "Failed to persist image task ownership")
+		return
+	}
 	taskDir := filepath.Join(imageTaskStorageDir(), taskID)
 	if err = os.MkdirAll(taskDir, 0o700); err != nil {
 		imageTaskError(c, http.StatusInternalServerError, "Failed to initialize image task storage")
@@ -301,6 +311,11 @@ func processImageTask(
 	task *model.ImageTask,
 	client *http.Client,
 ) {
+	release, guardErr := model.BeginNewmaxTokenOperation(task.TokenID)
+	if guardErr != nil {
+		return
+	}
+	defer release()
 	defer cleanupImageTaskRequest(task.TaskID, task.RequestPath)
 	requestFile, err := os.Open(task.RequestPath)
 	if err != nil {

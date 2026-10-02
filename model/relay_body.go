@@ -17,13 +17,13 @@ import (
 //     既可直接肉眼/LIKE 检索，又不额外占行内空间。
 //   - Truncated：响应体超出上限（防单请求 OOM）时置真，标记该行正文不完整。
 type RelayBody struct {
-	Id               int64  `json:"id"`
-	RequestId        string `json:"request_id" gorm:"index:idx_relay_body_request_id;default:''"`
-	UserId           int    `json:"user_id" gorm:"index:idx_relay_body_user"`
-	TokenId          int    `json:"token_id" gorm:"default:0"`
-	TokenName        string `json:"token_name" gorm:"index:idx_relay_body_token_created,priority:1;default:''"`
-	ChannelId        int    `json:"channel_id" gorm:"default:0"`
-	ModelName        string `json:"model_name" gorm:"index:idx_relay_body_model;default:''"`
+	Id           int64  `json:"id"`
+	RequestId    string `json:"request_id" gorm:"index:idx_relay_body_request_id;default:''"`
+	UserId       int    `json:"user_id" gorm:"index:idx_relay_body_user"`
+	TokenId      int    `json:"token_id" gorm:"default:0"`
+	TokenName    string `json:"token_name" gorm:"index:idx_relay_body_token_created,priority:1;default:''"`
+	ChannelId    int    `json:"channel_id" gorm:"default:0"`
+	ModelName    string `json:"model_name" gorm:"index:idx_relay_body_model;default:''"`
 	RequestPath  string `json:"request_path" gorm:"default:''"`
 	IsStream     bool   `json:"is_stream"`
 	StatusCode   int    `json:"status_code" gorm:"default:0"`
@@ -38,6 +38,11 @@ func (RelayBody) TableName() string { return "relay_bodies" }
 // RecordRelayBody 异步安全的正文落库（调用方通常已在 gopool 协程内）。
 // best-effort：写失败只记日志，绝不影响主请求链路。
 func RecordRelayBody(rb *RelayBody) {
+	release, err := BeginNewmaxTokenOperation(rb.TokenId)
+	if err != nil {
+		return
+	}
+	defer release()
 	if err := LOG_DB.Create(rb).Error; err != nil {
 		common.SysError("failed to record relay body: " + err.Error())
 	}

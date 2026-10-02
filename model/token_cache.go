@@ -9,9 +9,14 @@ import (
 )
 
 func cacheSetToken(token Token) error {
+	release, err := BeginNewmaxTokenOperation(token.Id)
+	if err != nil {
+		return err
+	}
+	defer release()
 	key := common.GenerateHMAC(token.Key)
 	token.Clean()
-	err := common.RedisHSetObj(fmt.Sprintf("token:%s", key), &token, time.Duration(common.RedisKeyCacheSeconds())*time.Second)
+	err = common.RedisHSetObj(fmt.Sprintf("token:%s", key), &token, time.Duration(common.RedisKeyCacheSeconds())*time.Second)
 	if err != nil {
 		return err
 	}

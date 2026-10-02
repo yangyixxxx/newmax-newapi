@@ -258,7 +258,7 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 
 		token, err := model.GetTokenByKey(key, false)
 		if err != nil {
-			if errors.Is(err, gorm.ErrRecordNotFound) {
+			if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, model.ErrNewmaxAccountDeleted) {
 				c.JSON(http.StatusUnauthorized, gin.H{
 					"success": false,
 					"message": common.TranslateMessage(c, i18n.MsgTokenInvalid),

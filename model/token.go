@@ -226,7 +226,7 @@ func ValidateUserToken(key string) (token *Token, err error) {
 		return token, nil
 	}
 	common.SysLog("ValidateUserToken: failed to get token: " + err.Error())
-	if errors.Is(err, gorm.ErrRecordNotFound) {
+	if errors.Is(err, gorm.ErrRecordNotFound) || errors.Is(err, ErrNewmaxAccountDeleted) {
 		return nil, ErrTokenInvalid
 	}
 	return nil, fmt.Errorf("%w: %v", ErrDatabase, err)
@@ -260,7 +260,17 @@ func GetTokenById(id int) (*Token, error) {
 }
 
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
+	if err = ValidateNewmaxTokenKey(key); err != nil {
+		return nil, err
+	}
 	defer func() {
+		if err == nil {
+			err = ValidateNewmaxTokenKey(key)
+			if err != nil {
+				token = nil
+				return
+			}
+		}
 		// Update Redis cache asynchronously on successful DB read
 		if shouldUpdateRedis(fromDB, err) && token != nil {
 			gopool.Go(func() {

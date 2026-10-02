@@ -271,6 +271,11 @@ func migrateDB() error {
 	err := DB.AutoMigrate(
 		&Channel{},
 		&Token{},
+		&NewmaxAccountOwnership{},
+		&NewmaxOwnedToken{},
+		&NewmaxAccountOperation{},
+		&NewmaxRevokedKey{},
+		&NewmaxImageTaskDirectory{},
 		&User{},
 		&PasskeyCredential{},
 		&Option{},
@@ -328,6 +333,11 @@ func migrateDBFast() error {
 	}{
 		{&Channel{}, "Channel"},
 		{&Token{}, "Token"},
+		{&NewmaxAccountOwnership{}, "NewmaxAccountOwnership"},
+		{&NewmaxOwnedToken{}, "NewmaxOwnedToken"},
+		{&NewmaxAccountOperation{}, "NewmaxAccountOperation"},
+		{&NewmaxRevokedKey{}, "NewmaxRevokedKey"},
+		{&NewmaxImageTaskDirectory{}, "NewmaxImageTaskDirectory"},
 		{&User{}, "User"},
 		{&PasskeyCredential{}, "PasskeyCredential"},
 		{&Option{}, "Option"},

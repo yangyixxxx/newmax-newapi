@@ -12,6 +12,7 @@ import (
 )
 
 func SetApiRouter(router *gin.Engine) {
+	router.POST("/internal/newmax/accounts/delete", controller.DeleteNewmaxAccount)
 	apiRouter := router.Group("/api")
 	apiRouter.Use(middleware.RouteTag("api"))
 	apiRouter.Use(gzip.Gzip(gzip.DefaultCompression))
