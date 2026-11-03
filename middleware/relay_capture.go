@@ -85,19 +85,20 @@ func RelayBodyCapture() gin.HandlerFunc {
 		}
 
 		rb := &model.RelayBody{
-			RequestId:    c.GetString(common.RequestIdKey),
-			UserId:       c.GetInt("id"),
-			TokenId:      c.GetInt("token_id"),
-			TokenName:    c.GetString("token_name"),
-			ChannelId:    common.GetContextKeyInt(c, constant.ContextKeyChannelId),
-			ModelName:    c.GetString("original_model"),
-			RequestPath:  c.Request.URL.Path,
-			IsStream:     writer.Header().Get("Content-Type") == "text/event-stream" || bytes.Contains(writer.body.Bytes(), []byte("data:")),
-			StatusCode:   writer.Status(),
-			RequestBody:  reqBody,
-			ResponseBody: writer.body.String(),
-			Truncated:    writer.truncated || reqTruncated,
-			CreatedAt:    time.Now().Unix(),
+			RequestId:         c.GetString(common.RequestIdKey),
+			UpstreamRequestId: c.GetString(common.UpstreamRequestIdKey),
+			UserId:            c.GetInt("id"),
+			TokenId:           c.GetInt("token_id"),
+			TokenName:         c.GetString("token_name"),
+			ChannelId:         common.GetContextKeyInt(c, constant.ContextKeyChannelId),
+			ModelName:         c.GetString("original_model"),
+			RequestPath:       c.Request.URL.Path,
+			IsStream:          writer.Header().Get("Content-Type") == "text/event-stream" || bytes.Contains(writer.body.Bytes(), []byte("data:")),
+			StatusCode:        writer.Status(),
+			RequestBody:       reqBody,
+			ResponseBody:      writer.body.String(),
+			Truncated:         writer.truncated || reqTruncated,
+			CreatedAt:         time.Now().Unix(),
 		}
 
 		gopool.Go(func() {

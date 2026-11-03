@@ -515,7 +515,12 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo) (*http
 		return nil, errors.New("resp is nil")
 	}
 
-	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
+	upID := resp.Header.Get(common2.RequestIdKey)
+	if upID == "" {
+		// TokenDance 等上游不返回 X-Oneapi-Request-Id，只在 X-Trace-Id 里给追踪 ID。
+		upID = resp.Header.Get("X-Trace-Id")
+	}
+	if upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 

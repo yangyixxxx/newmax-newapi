@@ -3,9 +3,12 @@ package channel
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -190,4 +193,25 @@ func TestProcessHeaderOverride_PassHeadersTemplateSetsRuntimeHeaders(t *testing.
 	require.Equal(t, "Codex CLI", upstreamReq.Header.Get("Originator"))
 	require.Equal(t, "sess-123", upstreamReq.Header.Get("Session_id"))
 	require.Empty(t, upstreamReq.Header.Get("X-Codex-Beta-Features"))
+}
+
+func TestDoRequest_FallsBackToTraceIdForUpstreamRequestId(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	service.InitHttpClient()
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Trace-Id", "trace-502")
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer upstream.Close()
+
+	ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader("{}"))
+	req, err := http.NewRequest(http.MethodPost, upstream.URL, strings.NewReader("{}"))
+	require.NoError(t, err)
+
+	resp, err := doRequest(ctx, req, &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}})
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusBadGateway, resp.StatusCode)
+	require.Equal(t, "trace-502", ctx.GetString(common.UpstreamRequestIdKey))
 }

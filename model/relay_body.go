@@ -17,20 +17,22 @@ import (
 //     既可直接肉眼/LIKE 检索，又不额外占行内空间。
 //   - Truncated：响应体超出上限（防单请求 OOM）时置真，标记该行正文不完整。
 type RelayBody struct {
-	Id           int64  `json:"id"`
-	RequestId    string `json:"request_id" gorm:"index:idx_relay_body_request_id;default:''"`
-	UserId       int    `json:"user_id" gorm:"index:idx_relay_body_user"`
-	TokenId      int    `json:"token_id" gorm:"default:0"`
-	TokenName    string `json:"token_name" gorm:"index:idx_relay_body_token_created,priority:1;default:''"`
-	ChannelId    int    `json:"channel_id" gorm:"default:0"`
-	ModelName    string `json:"model_name" gorm:"index:idx_relay_body_model;default:''"`
-	RequestPath  string `json:"request_path" gorm:"default:''"`
-	IsStream     bool   `json:"is_stream"`
-	StatusCode   int    `json:"status_code" gorm:"default:0"`
-	RequestBody  string `json:"request_body" gorm:"type:text"`
-	ResponseBody string `json:"response_body" gorm:"type:text"`
-	Truncated    bool   `json:"truncated"`
-	CreatedAt    int64  `json:"created_at" gorm:"bigint;index:idx_relay_body_token_created,priority:2;index:idx_relay_body_created"`
+	Id        int64  `json:"id"`
+	RequestId string `json:"request_id" gorm:"index:idx_relay_body_request_id;default:''"`
+	// 上游返回的请求/追踪 ID，失败时提供给上游排查。不建索引，避免大表迁移锁表。
+	UpstreamRequestId string `json:"upstream_request_id" gorm:"type:varchar(128);default:''"`
+	UserId            int    `json:"user_id" gorm:"index:idx_relay_body_user"`
+	TokenId           int    `json:"token_id" gorm:"default:0"`
+	TokenName         string `json:"token_name" gorm:"index:idx_relay_body_token_created,priority:1;default:''"`
+	ChannelId         int    `json:"channel_id" gorm:"default:0"`
+	ModelName         string `json:"model_name" gorm:"index:idx_relay_body_model;default:''"`
+	RequestPath       string `json:"request_path" gorm:"default:''"`
+	IsStream          bool   `json:"is_stream"`
+	StatusCode        int    `json:"status_code" gorm:"default:0"`
+	RequestBody       string `json:"request_body" gorm:"type:text"`
+	ResponseBody      string `json:"response_body" gorm:"type:text"`
+	Truncated         bool   `json:"truncated"`
+	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_relay_body_token_created,priority:2;index:idx_relay_body_created"`
 }
 
 func (RelayBody) TableName() string { return "relay_bodies" }
