@@ -235,6 +235,10 @@ func writeImageTaskResponse(c *gin.Context, task *model.ImageTask, status int) {
 }
 
 func StartImageTaskWorker(internalBaseURL string) {
+	if !common.GetEnvOrDefaultBool("IMAGE_TASK_WORKER_ENABLED", true) {
+		common.SysLog("image task worker disabled on this node")
+		return
+	}
 	imageTaskWorkerOnce.Do(func() {
 		if err := os.MkdirAll(imageTaskStorageDir(), 0o700); err != nil {
 			common.SysError(fmt.Sprintf("failed to initialize image task storage: %v", err))
